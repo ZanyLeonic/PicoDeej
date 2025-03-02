@@ -5,16 +5,15 @@ import utime
 NUM_SLIDERS = 2
 NUM_SWITCHES = 3
 
-analogSliderValues = [0, 0, 0]
+analogSliderValues = [0, 0]
 switchValues = [
     machine.Pin(2, machine.Pin.IN, machine.Pin.PULL_UP),
     machine.Pin(3, machine.Pin.IN, machine.Pin.PULL_UP),
-    machine.Pin(4, machine.Pin.IN, machine.Pin.PULL_UP)
+    machine.Pin(4, machine.Pin.IN, machine.Pin.PULL_UP) # Change depending on what type of switches you have
 ]
 
 slideMaster = machine.ADC(26)
 slideProg1 = machine.ADC(27)
-slideProg2 = machine.ADC(28)
 
 # Read each slider's position
 def updateSliderValues():
@@ -36,7 +35,7 @@ def sendSliderValues():
             builtString += '|'
     
     for z in range(NUM_SWITCHES):
-        builtString2 += str(1 - switchValues[z].value())
+        builtString2 += str(1 - switchValues[z].value()) # Change depending on what type of switches you have
         
         if (z < NUM_SWITCHES - 1):
             builtString2 += '|'

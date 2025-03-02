@@ -285,7 +285,7 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 		currentTime := time.Now();
 		pressDiff := currentTime.Sub(sio.currentSwitchesDelayValues[switchIdx])
 
-		logger.Info("id: ", switchIdx, " delay: ", pressDiff, " vs ", sio.deej.config.SwitchesDelayBetweeenPresses, "ms")
+		logger.Debug("id: ", switchIdx, " delay: ", pressDiff, " vs ", sio.deej.config.SwitchesDelayBetweeenPresses, "ms")
 
 		if pressDiff < (time.Duration(sio.deej.config.SwitchesDelayBetweeenPresses) * time.Millisecond) {
 			continue
@@ -301,7 +301,7 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 			logger.Debug("Play/Pause")
 			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PLAY_PAUSE)
 		case "back":
-			logger.Debug("Back")
+			logger.Debug("Prev. track")
 			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PREV_TRACK)
 		default:
 			logger.Debug("Unimplemented keypress ", sAct[0])
