@@ -293,23 +293,7 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 
 		sAct, _ := sio.deej.config.SwitchesMapping.get(switchIdx)
 
-		switch sAct[0] {
-		case "next":
-			logger.Debug("Next track")
-			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_NEXT_TRACK)
-		case "play_pause":
-			logger.Debug("Play/Pause")
-			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PLAY_PAUSE)
-		case "back":
-			logger.Debug("Prev. track")
-			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PREV_TRACK)
-		default:
-			logger.Debug("Unimplemented keypress ", sAct[0])
-		}
-
-		sio.kbBonding.Press()
-		time.Sleep(1 * time.Millisecond)
-		sio.kbBonding.Release()
+		sio.HandleMediaKeys(logger, sAct[0])
 
 		sio.currentSwitchesDelayValues[switchIdx] = time.Now()
 	}
