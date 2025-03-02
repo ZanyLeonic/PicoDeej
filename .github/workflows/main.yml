@@ -38,7 +38,7 @@ jobs:
         uses: actions/upload-artifact@v4.6.1
         if: runner.os == 'Windows'
         with:
-          name: deej-${{ matrix.mode }}
+          name: deej-${{ runner.os }}-${{ matrix.mode }}
           path: deej-${{ matrix.mode }}.exe
 
       - name: Build deej (Linux)
@@ -49,5 +49,5 @@ jobs:
         uses: actions/upload-artifact@v4.6.1
         if: runner.os == 'Linux'
         with:
-          name: deej-${{ matrix.mode }}
+          name: deej-${{ runner.os }}-${{ matrix.mode }}
           path: deej-${{ matrix.mode }}
