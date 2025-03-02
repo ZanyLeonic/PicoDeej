@@ -15,11 +15,18 @@ slider_mapping:
     - rocketleague.exe
   4: discord.exe
 
+switches_mapping:
+  0: back
+  1:
+    - play
+    - pause
+  2: next
+
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 
 # settings for connecting to the arduino board
-com_port: COM4
+com_port: COM5
 baud_rate: 9600
 
 # adjust the amount of signal noise reduction depending on your hardware quality

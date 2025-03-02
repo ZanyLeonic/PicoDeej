@@ -13,7 +13,7 @@ import (
 	"github.com/jacobsa/go-serial/serial"
 	"go.uber.org/zap"
 
-	"github.com/omriharel/deej/pkg/deej/util"
+	"github.com/zanyleonic/picodeej/pkg/deej/util"
 )
 
 // SerialIO provides a deej-aware abstraction layer to managing serial I/O
@@ -30,6 +30,7 @@ type SerialIO struct {
 	conn        io.ReadWriteCloser
 
 	lastKnownNumSliders        int
+	lastKnownNumSwitches       int
 	currentSliderPercentValues []float32
 
 	sliderMoveConsumers []chan SliderMoveEvent
@@ -238,6 +239,27 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	// trim the suffix
 	line = strings.TrimSuffix(line, "\r\n")
 
+	splitLine := strings.Split(line, " ")
+
+	sio.handleSliders(logger, splitLine[0])
+	sio.handleSwitches(logger, splitLine[1])
+	logger.Infow(line)
+}
+
+
+func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
+	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
+	splitLine := strings.Split(line, "|")
+	numSwitches := len(splitLine)
+
+	// update our slider count, if needed - this will send slider move events for all
+	if numSwitches != sio.lastKnownNumSwitches {
+		logger.Infow("Detected switches", "amount", numSwitches)
+		sio.lastKnownNumSwitches = numSwitches
+	}
+}
+
+func (sio *SerialIO) handleSliders(logger *zap.SugaredLogger, line string) {
 	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
 	splitLine := strings.Split(line, "|")
 	numSliders := len(splitLine)

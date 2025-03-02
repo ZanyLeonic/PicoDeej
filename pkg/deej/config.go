@@ -10,13 +10,14 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 
-	"github.com/omriharel/deej/pkg/deej/util"
+	"github.com/zanyleonic/picodeej/pkg/deej/util"
 )
 
 // CanonicalConfig provides application-wide access to configuration fields,
 // as well as loading/file watching logic for deej's configuration file
 type CanonicalConfig struct {
 	SliderMapping *sliderMap
+	SwitchesMapping *sliderMap
 
 	ConnectionInfo struct {
 		COMPort  string
@@ -48,6 +49,7 @@ const (
 
 	configType = "yaml"
 
+	configKeySwitchesMapping     = "switches_mapping"
 	configKeySliderMapping       = "slider_mapping"
 	configKeyInvertSliders       = "invert_sliders"
 	configKeyCOMPort             = "com_port"
@@ -62,6 +64,13 @@ const (
 var internalConfigPath = path.Join(".", logDirectory)
 
 var defaultSliderMapping = func() *sliderMap {
+	emptyMap := newSliderMap()
+	emptyMap.set(0, []string{masterSessionName})
+
+	return emptyMap
+}()
+
+var defaultSwitchesMapping = func() *sliderMap {
 	emptyMap := newSliderMap()
 	emptyMap.set(0, []string{masterSessionName})
 
@@ -85,6 +94,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetConfigType(configType)
 	userConfig.AddConfigPath(userConfigPath)
 
+	userConfig.SetDefault(configKeySwitchesMapping, map[string][]string{})
 	userConfig.SetDefault(configKeySliderMapping, map[string][]string{})
 	userConfig.SetDefault(configKeyInvertSliders, false)
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
@@ -144,6 +154,7 @@ func (cc *CanonicalConfig) Load() error {
 
 	cc.logger.Info("Loaded config successfully")
 	cc.logger.Infow("Config values",
+		"switchesMapping", cc.SwitchesMapping,
 		"sliderMapping", cc.SliderMapping,
 		"connectionInfo", cc.ConnectionInfo,
 		"invertSliders", cc.InvertSliders)
