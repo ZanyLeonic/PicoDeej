@@ -13,6 +13,7 @@ import (
 	"github.com/jacobsa/go-serial/serial"
 	"go.uber.org/zap"
 
+	"github.com/micmonay/keybd_event"
 	"github.com/zanyleonic/picodeej/pkg/deej/util"
 )
 
@@ -32,6 +33,10 @@ type SerialIO struct {
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int
 	currentSliderPercentValues []float32
+	currentSwitchesDelayValues []time.Time
+
+	last []time.Time
+	kbBonding keybd_event.KeyBonding
 
 	sliderMoveConsumers []chan SliderMoveEvent
 }
@@ -49,6 +54,13 @@ var expectedLinePattern = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n
 func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 	logger = logger.Named("serial")
 
+	kb, err := keybd_event.NewKeyBonding()
+
+	if err != nil {
+		logger.Warn("Failed to initialise key bonding!")
+		return nil, err
+	}
+
 	sio := &SerialIO{
 		deej:                deej,
 		logger:              logger,
@@ -56,6 +68,7 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 		connected:           false,
 		conn:                nil,
 		sliderMoveConsumers: []chan SliderMoveEvent{},
+		kbBonding: kb,
 	}
 
 	logger.Debug("Created serial i/o instance")
@@ -251,13 +264,55 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 	splitLine := strings.Split(line, "|")
 	numSwitches := len(splitLine)
 
-	// update our slider count, if needed - this will send slider move events for all
+	// update our switch count, if needed - this will send slider move events for all
 	if numSwitches != sio.lastKnownNumSwitches {
 		logger.Infow("Detected switches", "amount", numSwitches)
 		sio.lastKnownNumSwitches = numSwitches
+		sio.currentSwitchesDelayValues = make([]time.Time, numSwitches)
+
+		for idx := range sio.currentSwitchesDelayValues {
+			sio.currentSwitchesDelayValues[idx] = time.Now()
+		}
 	}
 
-	logger.Infow(line)
+	for switchIdx, stringValue := range splitLine {
+		cVal := util.Atob(stringValue)
+
+		if !cVal {
+			continue
+		}
+
+		currentTime := time.Now();
+		pressDiff := currentTime.Sub(sio.currentSwitchesDelayValues[switchIdx])
+
+		logger.Info("id: ", switchIdx, " delay: ", pressDiff, " vs ", sio.deej.config.SwitchesDelayBetweeenPresses, "ms")
+
+		if pressDiff < (time.Duration(sio.deej.config.SwitchesDelayBetweeenPresses) * time.Millisecond) {
+			continue
+		}
+
+		sAct, _ := sio.deej.config.SwitchesMapping.get(switchIdx)
+
+		switch sAct[0] {
+		case "next":
+			logger.Debug("Next track")
+			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_NEXT_TRACK)
+		case "play_pause":
+			logger.Debug("Play/Pause")
+			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PLAY_PAUSE)
+		case "back":
+			logger.Debug("Back")
+			sio.kbBonding.SetKeys(keybd_event.VK_MEDIA_PREV_TRACK)
+		default:
+			logger.Debug("Unimplemented keypress ", sAct[0])
+		}
+
+		sio.kbBonding.Press()
+		time.Sleep(1 * time.Millisecond)
+		sio.kbBonding.Release()
+
+		sio.currentSwitchesDelayValues[switchIdx] = time.Now()
+	}
 }
 
 func (sio *SerialIO) handleSliders(logger *zap.SugaredLogger, line string) {
