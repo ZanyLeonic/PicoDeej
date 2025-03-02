@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/zanyleonicd/picodeej/pkg/deej"
+	"github.com/zanyleonic/picodeej/pkg/deej"
 )
 
 var (

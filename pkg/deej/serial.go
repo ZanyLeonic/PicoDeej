@@ -243,7 +243,6 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 
 	sio.handleSliders(logger, splitLine[0])
 	sio.handleSwitches(logger, splitLine[1])
-	logger.Infow(line)
 }
 
 
@@ -257,6 +256,8 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 		logger.Infow("Detected switches", "amount", numSwitches)
 		sio.lastKnownNumSwitches = numSwitches
 	}
+
+	logger.Infow(line)
 }
 
 func (sio *SerialIO) handleSliders(logger *zap.SugaredLogger, line string) {
