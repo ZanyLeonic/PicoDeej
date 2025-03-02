@@ -8,19 +8,13 @@
 # important: slider indexes start at 0, regardless of which analog pins you're using!
 slider_mapping:
   0: master
-  1: chrome.exe
-  2: spotify.exe
-  3:
-    - pathofexile_x64.exe
-    - rocketleague.exe
-  4: discord.exe
 
 switches_mapping:
   0: back
-  1:
-    - play
-    - pause
+  1: play_pause
   2: next
+
+switches_delay: 150
 
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false

@@ -24,6 +24,8 @@ type CanonicalConfig struct {
 		BaudRate int
 	}
 
+	SwitchesDelayBetweeenPresses int
+
 	InvertSliders bool
 
 	NoiseReductionLevel string
@@ -50,6 +52,7 @@ const (
 	configType = "yaml"
 
 	configKeySwitchesMapping     = "switches_mapping"
+	configKeySwitchesDelay		 = "switches_delay"
 	configKeySliderMapping       = "slider_mapping"
 	configKeyInvertSliders       = "invert_sliders"
 	configKeyCOMPort             = "com_port"
@@ -58,6 +61,7 @@ const (
 
 	defaultCOMPort  = "COM4"
 	defaultBaudRate = 9600
+	defaultDelayPress = 150
 )
 
 // has to be defined as a non-constant because we're using path.Join
@@ -99,6 +103,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyInvertSliders, false)
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
 	userConfig.SetDefault(configKeyBaudRate, defaultBaudRate)
+	userConfig.SetDefault(configKeySwitchesDelay, defaultDelayPress)
 
 	internalConfig := viper.New()
 	internalConfig.SetConfigName(internalConfigName)
@@ -156,6 +161,7 @@ func (cc *CanonicalConfig) Load() error {
 	cc.logger.Infow("Config values",
 		"switchesMapping", cc.SwitchesMapping,
 		"sliderMapping", cc.SliderMapping,
+		"switchesDelay", cc.SwitchesDelayBetweeenPresses,
 		"connectionInfo", cc.ConnectionInfo,
 		"invertSliders", cc.InvertSliders)
 
@@ -234,6 +240,10 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 		cc.internalConfig.GetStringMapStringSlice(configKeySliderMapping),
 	)
 
+	cc.SwitchesMapping = sliderMapFromConfigs(
+		cc.userConfig.GetStringMapStringSlice(configKeySwitchesMapping),
+		cc.internalConfig.GetStringMapStringSlice(configKeySwitchesMapping),
+	)
 	// get the rest of the config fields - viper saves us a lot of effort here
 	cc.ConnectionInfo.COMPort = cc.userConfig.GetString(configKeyCOMPort)
 
@@ -245,6 +255,16 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 			"defaultValue", defaultBaudRate)
 
 		cc.ConnectionInfo.BaudRate = defaultBaudRate
+	}
+
+	cc.SwitchesDelayBetweeenPresses = cc.userConfig.GetInt(configKeySwitchesDelay)
+	if cc.SwitchesDelayBetweeenPresses <= 0 {
+		cc.logger.Warnw("Invalid baud rate specified, using default value",
+			"key", configKeyBaudRate,
+			"invalidValue", cc.SwitchesDelayBetweeenPresses,
+			"defaultValue", defaultBaudRate)
+
+		cc.SwitchesDelayBetweeenPresses = defaultDelayPress
 	}
 
 	cc.InvertSliders = cc.userConfig.GetBool(configKeyInvertSliders)
