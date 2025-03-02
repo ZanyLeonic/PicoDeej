@@ -124,3 +124,11 @@ func SignificantlyDifferent(old float32, new float32, noiseReductionLevel string
 func almostEquals(a float32, b float32) bool {
 	return math.Abs(float64(a-b)) < 0.000001
 }
+
+func Atob(s string) bool {
+	if s == "1" {
+		return true
+	} else {
+		return false
+	}
+}
