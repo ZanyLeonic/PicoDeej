@@ -16,6 +16,7 @@ require (
 	github.com/micmonay/keybd_event v1.1.2 // indirect
 	github.com/mitchellh/go-ps v1.0.0
 	github.com/moutend/go-wca v0.1.2-0.20190422112502-0fa027b3d89a
+	github.com/ncruces/zenity v0.10.14 // indirect
 	github.com/spf13/viper v1.7.1
 	github.com/thoas/go-funk v0.7.0
 	go.uber.org/zap v1.15.0

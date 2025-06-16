@@ -2,6 +2,7 @@ package deej
 
 import (
 	"github.com/getlantern/systray"
+	"github.com/ncruces/zenity"
 
 	"github.com/zanyleonic/picodeej/pkg/deej/icon"
 	"github.com/zanyleonic/picodeej/pkg/deej/util"
@@ -22,6 +23,8 @@ func (d *Deej) initializeTray(onDone func()) {
 
 		refreshSessions := systray.AddMenuItem("Re-scan audio sessions", "Manually refresh audio sessions if something's stuck")
 		refreshSessions.SetIcon(icon.RefreshSessions)
+
+		uploadImage := systray.AddMenuItem("Upload image", "Upload an image to the Deej's display")
 
 		if d.version != "" {
 			systray.AddSeparator()
@@ -63,6 +66,20 @@ func (d *Deej) initializeTray(onDone func()) {
 					// performance: the reason that forcing a refresh here is okay is that users can't spam the
 					// right-click -> select-this-option sequence at a rate that's meaningful to performance
 					d.sessions.refreshSessions(true)
+
+				case <- uploadImage.ClickedCh:
+					logger.Info("Upload image menu item, clicked, opening dialog")
+					file, err := zenity.SelectFile(
+						zenity.Filename(``),
+						zenity.FileFilters{
+							{Name: "Portable Network Graphic", Patterns: []string{"*.png"}, CaseFold: true},
+						})
+					
+					if err != nil {
+						logger.Errorw("Failed to create zenity file picker!", "error", err)
+						return	
+					}
+					logger.Debug(file)
 				}
 			}
 		}()
