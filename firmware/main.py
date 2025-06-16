@@ -28,7 +28,7 @@ DEFAULT_IMAGE = "default.png"
 UPLOAD_IMAGE = "uploaded.dat"
 
 # Read each slider's position
-def updateSliderValues():
+def update_slider_values():
     for x in range(NUM_SLIDERS):
         if(x == 0):
             analogSliderValues[0] = slideMaster.read_u16() //64
@@ -36,7 +36,7 @@ def updateSliderValues():
             analogSliderValues[1] = slideProg1.read_u16() //64
 
 # Make a string with all slider values and print it
-def sendSliderValues():
+def send_slider_values():
     builtString = ""
     builtString2 = ""
     
@@ -104,6 +104,6 @@ if __name__=='__main__':
     # Input/Output loop
     while(True):
         read_input()
-        updateSliderValues()
-        sendSliderValues()
+        update_slider_values()
+        send_slider_values()
         utime.sleep(0.01)
