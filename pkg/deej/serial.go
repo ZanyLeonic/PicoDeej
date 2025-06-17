@@ -30,12 +30,14 @@ type SerialIO struct {
 	connOptions serial.OpenOptions
 	conn        io.ReadWriteCloser
 
+	messageQueue chan []byte
+
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int
 	currentSliderPercentValues []float32
 	currentSwitchesDelayValues []time.Time
 
-	last []time.Time
+	last      []time.Time
 	kbBonding keybd_event.KeyBonding
 
 	sliderMoveConsumers []chan SliderMoveEvent
@@ -65,10 +67,11 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 		deej:                deej,
 		logger:              logger,
 		stopChannel:         make(chan bool),
+		messageQueue:        make(chan []byte, 10),
 		connected:           false,
 		conn:                nil,
 		sliderMoveConsumers: []chan SliderMoveEvent{},
-		kbBonding: kb,
+		kbBonding:           kb,
 	}
 
 	logger.Debug("Created serial i/o instance")
@@ -126,7 +129,9 @@ func (sio *SerialIO) Start() error {
 	// read lines or await a stop
 	go func() {
 		connReader := bufio.NewReader(sio.conn)
+
 		lineChannel := sio.readLine(namedLogger, connReader)
+		sio.writeLine(namedLogger)
 
 		for {
 			select {
@@ -218,6 +223,7 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 	go func() {
 		for {
 			line, err := reader.ReadString('\n')
+			logger.Info(line)
 			if err != nil {
 
 				if sio.deej.Verbose() {
@@ -258,7 +264,6 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	sio.handleSwitches(logger, splitLine[1])
 }
 
-
 func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
 	splitLine := strings.Split(line, "|")
@@ -282,7 +287,7 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 			continue
 		}
 
-		currentTime := time.Now();
+		currentTime := time.Now()
 		pressDiff := currentTime.Sub(sio.currentSwitchesDelayValues[switchIdx])
 
 		logger.Debug("id: ", switchIdx, " delay: ", pressDiff, " vs ", sio.deej.config.SwitchesDelayBetweeenPresses, "ms")
@@ -366,4 +371,24 @@ func (sio *SerialIO) handleSliders(logger *zap.SugaredLogger, line string) {
 			}
 		}
 	}
+}
+
+func (sio *SerialIO) writeLine(logger *zap.SugaredLogger) {
+	go func() {
+		for {
+			select {
+			case msg, more := <-sio.messageQueue:
+				b, err := sio.conn.Write(msg)
+				if err != nil {
+					logger.Errorw("Error when writing bytes to buffer serial device", "error", err)
+				}
+
+				logger.Debugw("Wrote to serial device", "bytes", b)
+
+				if !more || sio.messageQueue == nil {
+					return
+				}
+			}
+		}
+	}()
 }

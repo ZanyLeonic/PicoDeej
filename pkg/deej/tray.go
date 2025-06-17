@@ -67,19 +67,20 @@ func (d *Deej) initializeTray(onDone func()) {
 					// right-click -> select-this-option sequence at a rate that's meaningful to performance
 					d.sessions.refreshSessions(true)
 
-				case <- uploadImage.ClickedCh:
+				case <-uploadImage.ClickedCh:
 					logger.Info("Upload image menu item, clicked, opening dialog")
 					file, err := zenity.SelectFile(
 						zenity.Filename(``),
 						zenity.FileFilters{
 							{Name: "Portable Network Graphic", Patterns: []string{"*.png"}, CaseFold: true},
 						})
-					
+
 					if err != nil {
 						logger.Errorw("Failed to create zenity file picker!", "error", err)
-						return	
+						return
 					}
 					logger.Debug(file)
+					d.serial.messageQueue <- []byte("sendimg 10")
 				}
 			}
 		}()
