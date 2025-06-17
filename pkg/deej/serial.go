@@ -57,7 +57,9 @@ type ImageUploadState struct {
 	Dialog         *zenity.ProgressDialog
 }
 
-var expectedLinePattern = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
+var expectedControlInput = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
+var transferInput = regexp.MustCompile(`^OK(?: (?:READY|DONE)? ?\d+| \d+)\r\n$`)
+
 
 // NewSerialIO creates a SerialIO instance that uses the provided deej
 // instance's connection info to establish communications with the arduino chip
@@ -255,11 +257,15 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 }
 
 func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
+	// For when uploading an image to the microcontroller
+	if transferInput.MatchString(line) {
+		return
+	}
 
 	// this function receives an unsanitized line which is guaranteed to end with LF,
 	// but most lines will end with CRLF. it may also have garbage instead of
 	// deej-formatted values, so we must check for that! just ignore bad ones
-	if !expectedLinePattern.MatchString(line) {
+	if !expectedControlInput.MatchString(line) {
 		return
 	}
 
