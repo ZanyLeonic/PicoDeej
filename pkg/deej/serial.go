@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/ncruces/zenity"
 	"io"
+	"io/ioutil"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jacobsa/go-serial/serial"
@@ -60,6 +64,7 @@ type ImageUploadState struct {
 var expectedControlInput = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
 var transferInput = regexp.MustCompile(`^OK(?: (?:READY|DONE)? ?\d+| \d+)\r\n$`)
 
+const UploadBlock = 1024
 
 // NewSerialIO creates a SerialIO instance that uses the provided deej
 // instance's connection info to establish communications with the arduino chip
@@ -233,7 +238,6 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 	go func() {
 		for {
 			line, err := reader.ReadString('\n')
-			logger.Info(line)
 			if err != nil {
 
 				if sio.deej.Verbose() {
@@ -259,6 +263,10 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	// For when uploading an image to the microcontroller
 	if transferInput.MatchString(line) {
+		err := sio.transferBlock(logger, line)
+		if err != nil {
+			logger.Errorw("Error when transferring block!", "error", err)
+		}
 		return
 	}
 
@@ -441,6 +449,46 @@ func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) er
 	sio.currentUpload.Dialog = &dlg
 
 	sio.messageQueue <- []byte(fmt.Sprintf("sendimg %d", len(dat)))
+
+	return nil
+}
+
+func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error {
+	cu := sio.currentUpload
+	if cu == nil {
+		return errors.New("current upload object is empty")
+	}
+
+	logger.Debugw("Parsing line ", "line", line)
+
+	cu.Lock.Lock()
+	defer cu.Lock.Unlock()
+
+	dlg := *cu.Dialog
+
+	if cu.TotalBytesSent >= len(cu.LoadedFile) {
+		err := dlg.Complete()
+
+		if err != nil {
+			logger.Warnw("Issues cleaning up progress dialog", "error", err)
+		}
+		logger.Info("Upload completed")
+
+		return nil
+	}
+
+	end := util.MinInt(cu.TotalBytesSent+UploadBlock, len(cu.LoadedFile))
+	sio.messageQueue <- cu.LoadedFile[cu.TotalBytesSent:end]
+	cu.TotalBytesSent = end
+
+	err := dlg.Value(int((float64(cu.TotalBytesSent) / float64(len(cu.LoadedFile))) * 100))
+	err = dlg.Text(fmt.Sprintf("Uploaded %d/%d bytes", cu.TotalBytesSent, len(cu.LoadedFile)))
+
+	if err != nil {
+		logger.Warnw("Issues updating progress dialog", "error", err)
+	}
+
+	logger.Debugw("Sent bytes to controller", "sent", cu.TotalBytesSent, "total", len(cu.LoadedFile))
 
 	return nil
 }
