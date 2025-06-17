@@ -30,7 +30,8 @@ type SerialIO struct {
 	connOptions serial.OpenOptions
 	conn        io.ReadWriteCloser
 
-	messageQueue chan []byte
+	messageQueue  chan []byte
+	currentUpload *ImageUploadState
 
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int
@@ -47,6 +48,13 @@ type SerialIO struct {
 type SliderMoveEvent struct {
 	SliderID     int
 	PercentValue float32
+}
+
+type ImageUploadState struct {
+	Lock           sync.Mutex
+	LoadedFile     []byte
+	TotalBytesSent int
+	Dialog         *zenity.ProgressDialog
 }
 
 var expectedLinePattern = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
@@ -391,4 +399,42 @@ func (sio *SerialIO) writeLine(logger *zap.SugaredLogger) {
 			}
 		}
 	}()
+}
+
+func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) error {
+	sio.currentUpload = &ImageUploadState{}
+
+	sio.currentUpload.Lock.Lock()
+	defer sio.currentUpload.Lock.Unlock()
+
+	logger.Debugw("Attempting to open image", "path", path)
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	logger.Debug("Attempting to read bytes from file")
+	dat, err := ioutil.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	logger.Debugw("Creating progress dialog")
+	dlg, err := zenity.Progress(zenity.Title("Uploading Image"), zenity.NoCancel())
+	if err != nil {
+		return err
+	}
+
+	err = dlg.Text(fmt.Sprintf("0/%d", len(dat)))
+	if err != nil {
+		return err
+	}
+
+	sio.currentUpload.LoadedFile = dat
+	sio.currentUpload.TotalBytesSent = 0
+	sio.currentUpload.Dialog = &dlg
+
+	sio.messageQueue <- []byte(fmt.Sprintf("sendimg %d", len(dat)))
+
+	return nil
 }

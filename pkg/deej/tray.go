@@ -3,7 +3,6 @@ package deej
 import (
 	"github.com/getlantern/systray"
 	"github.com/ncruces/zenity"
-
 	"github.com/zanyleonic/picodeej/pkg/deej/icon"
 	"github.com/zanyleonic/picodeej/pkg/deej/util"
 )
@@ -79,8 +78,13 @@ func (d *Deej) initializeTray(onDone func()) {
 						logger.Errorw("Failed to create zenity file picker!", "error", err)
 						return
 					}
-					logger.Debug(file)
-					d.serial.messageQueue <- []byte("sendimg 10")
+
+					logger.Debugw("Selected a file using the file picker", "path", file)
+					err = d.serial.StartImageUpload(logger, file)
+					if err != nil {
+						logger.Errorw("Cannot upload selected image", "error", err)
+						return
+					}
 				}
 			}
 		}()
