@@ -24,6 +24,7 @@ func (d *Deej) initializeTray(onDone func()) {
 		refreshSessions.SetIcon(icon.RefreshSessions)
 
 		uploadImage := systray.AddMenuItem("Upload image", "Upload an image to the Deej's display")
+		uploadImage.SetIcon(icon.UploadImage)
 
 		if d.version != "" {
 			systray.AddSeparator()
