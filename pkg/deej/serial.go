@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/ncruces/zenity"
 	"io"
 	"io/ioutil"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ncruces/zenity"
 
 	"github.com/jacobsa/go-serial/serial"
 	"go.uber.org/zap"
@@ -63,6 +64,7 @@ type ImageUploadState struct {
 
 var expectedControlInput = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
 var transferInput = regexp.MustCompile(`^OK(?: (?:READY|DONE)? ?\d+| \d+)\r\n$`)
+var transferFail = regexp.MustCompile(`^FAIL`)
 
 const UploadBlock = 1024
 
@@ -267,6 +269,12 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 		if err != nil {
 			logger.Errorw("Error when transferring block!", "error", err)
 		}
+		return
+	}
+
+	// Handle I/O errors
+	if transferFail.MatchString(line) {
+		sio.handleTransferError(logger, line)
 		return
 	}
 
@@ -491,4 +499,30 @@ func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error
 	logger.Debugw("Sent bytes to controller", "sent", cu.TotalBytesSent, "total", len(cu.LoadedFile))
 
 	return nil
+}
+
+func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string) {
+	cus := sio.currentUpload
+
+	cleaned := strings.TrimSuffix(line, "\r\n")
+	split := strings.Split(cleaned, ",")
+
+	reason := "Unknown"
+	if len(split) > 1 {
+		reason = split[1]
+	} else {
+		logger.Warnw("Controller did not give a reason for failure", "line", split)
+	}
+
+	logger.Errorw("Failed to transfer image to microcontroller", "reason", reason)
+
+	cus.Lock.Lock()
+	defer cus.Lock.Unlock()
+
+	cus.LoadedFile = []byte{}
+	cus.TotalBytesSent = 0
+
+	dlg := *cus.Dialog
+	dlg.Text(fmt.Sprintf("Transfer FAILED! Reason: %s", reason))
+	dlg.Complete()
 }

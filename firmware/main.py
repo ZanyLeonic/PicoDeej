@@ -62,13 +62,12 @@ def read_input():
     res = ""
     while serial.poll(0):
         res+=(sys.stdin.read(1))
-    
     cmd = res.split(" ")
     if cmd[0] == "sendimg":
         if len(cmd) < 2 or not cmd[1].isdigit():
             return
         size = int(cmd[1])
-        if size > 1000000:
+        if size > 100000:
             print("FAIL, too big")
             return
         
