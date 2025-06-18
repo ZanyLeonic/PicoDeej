@@ -2,6 +2,7 @@ import machine
 import micropython
 import select
 import sys
+import os
 import tft_config
 import utime
 
@@ -26,6 +27,7 @@ serial.register(sys.stdin, select.POLLIN)
 # Image consts
 DEFAULT_IMAGE = "default.png"
 UPLOAD_IMAGE = "uploaded.dat"
+UPLOAD_PARTIAL = "uploaded.part"
 
 # Read each slider's position
 def update_slider_values():
@@ -67,7 +69,7 @@ def read_input():
         if len(cmd) < 2 or not cmd[1].isdigit():
             return
         size = int(cmd[1])
-        if size > 100000:
+        if size > 1000000:
             print("FAIL, too big")
             return
         
@@ -75,18 +77,25 @@ def read_input():
         
         micropython.kbd_intr(-1) # Disable keyboard interrupt whilst sending binary
         
-        data = b''
-        while len(data) < size:
-            if serial.poll(0):
-                remaining = size - len(data)
-                data += sys.stdin.buffer.read(min(1024, remaining))
-                print(f"OK {len(data)}")
+        total_recv = 0
+        with open(UPLOAD_PARTIAL, "wb") as f:
+            while total_recv < size:
+                if serial.poll(0):
+                    remaining = size - total_recv
+                    
+                    chunk = min(1024, remaining)
+                    f.write(sys.stdin.buffer.read(chunk))
+                    
+                    total_recv += chunk
+                    print(f"OK {total_recv}")
         
         micropython.kbd_intr(0x03) # Re-enable Keyboard interrupt
         
-        print(f"OK DONE {len(data)}")
-        with open(UPLOAD_IMAGE, "wb") as f:
-            f.write(data)
+        print(f"OK DONE {total_recv}")
+
+        os.remove(UPLOAD_IMAGE)
+        os.rename(UPLOAD_PARTIAL, UPLOAD_IMAGE)
+        os.sync()
         
         tft.png(UPLOAD_IMAGE, 0, 0)
 
@@ -94,6 +103,12 @@ if __name__=='__main__':
     # Initialise the screen
     tft = tft_config.config(0, buffer_size=4096)
     tft.init()
+    
+    # Attempt to delete any unfinished transfers
+    try:
+        os.delete(UPLOAD_PARTIAL)
+    except:
+        pass
     
     # Attempt to load the user's image, but fallback if it fails
     try:
