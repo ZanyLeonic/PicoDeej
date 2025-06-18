@@ -5,10 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/ncruces/zenity"
 
 	"github.com/jacobsa/go-serial/serial"
 	"go.uber.org/zap"
@@ -30,12 +35,15 @@ type SerialIO struct {
 	connOptions serial.OpenOptions
 	conn        io.ReadWriteCloser
 
+	messageQueue  chan []byte
+	currentUpload *ImageUploadState
+
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int
 	currentSliderPercentValues []float32
 	currentSwitchesDelayValues []time.Time
 
-	last []time.Time
+	last      []time.Time
 	kbBonding keybd_event.KeyBonding
 
 	sliderMoveConsumers []chan SliderMoveEvent
@@ -47,7 +55,18 @@ type SliderMoveEvent struct {
 	PercentValue float32
 }
 
-var expectedLinePattern = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
+type ImageUploadState struct {
+	Lock           sync.Mutex
+	LoadedFile     []byte
+	TotalBytesSent int
+	Dialog         *zenity.ProgressDialog
+}
+
+var expectedControlInput = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
+var transferInput = regexp.MustCompile(`^OK(?: (?:READY|DONE)? ?\d+| \d+)\r\n$`)
+var transferFail = regexp.MustCompile(`^FAIL`)
+
+const UploadBlock = 1024
 
 // NewSerialIO creates a SerialIO instance that uses the provided deej
 // instance's connection info to establish communications with the arduino chip
@@ -65,10 +84,11 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 		deej:                deej,
 		logger:              logger,
 		stopChannel:         make(chan bool),
+		messageQueue:        make(chan []byte, 10),
 		connected:           false,
 		conn:                nil,
 		sliderMoveConsumers: []chan SliderMoveEvent{},
-		kbBonding: kb,
+		kbBonding:           kb,
 	}
 
 	logger.Debug("Created serial i/o instance")
@@ -126,7 +146,9 @@ func (sio *SerialIO) Start() error {
 	// read lines or await a stop
 	go func() {
 		connReader := bufio.NewReader(sio.conn)
+
 		lineChannel := sio.readLine(namedLogger, connReader)
+		sio.writeLine(namedLogger)
 
 		for {
 			select {
@@ -241,11 +263,25 @@ func (sio *SerialIO) readLine(logger *zap.SugaredLogger, reader *bufio.Reader) c
 }
 
 func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
+	// For when uploading an image to the microcontroller
+	if transferInput.MatchString(line) {
+		err := sio.transferBlock(logger, line)
+		if err != nil {
+			logger.Errorw("Error when transferring block!", "error", err)
+		}
+		return
+	}
+
+	// Handle I/O errors
+	if transferFail.MatchString(line) {
+		sio.handleTransferError(logger, line)
+		return
+	}
 
 	// this function receives an unsanitized line which is guaranteed to end with LF,
 	// but most lines will end with CRLF. it may also have garbage instead of
 	// deej-formatted values, so we must check for that! just ignore bad ones
-	if !expectedLinePattern.MatchString(line) {
+	if !expectedControlInput.MatchString(line) {
 		return
 	}
 
@@ -257,7 +293,6 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	sio.handleSliders(logger, splitLine[0])
 	sio.handleSwitches(logger, splitLine[1])
 }
-
 
 func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
@@ -282,7 +317,7 @@ func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 			continue
 		}
 
-		currentTime := time.Now();
+		currentTime := time.Now()
 		pressDiff := currentTime.Sub(sio.currentSwitchesDelayValues[switchIdx])
 
 		logger.Debug("id: ", switchIdx, " delay: ", pressDiff, " vs ", sio.deej.config.SwitchesDelayBetweeenPresses, "ms")
@@ -366,4 +401,128 @@ func (sio *SerialIO) handleSliders(logger *zap.SugaredLogger, line string) {
 			}
 		}
 	}
+}
+
+func (sio *SerialIO) writeLine(logger *zap.SugaredLogger) {
+	go func() {
+		for {
+			select {
+			case msg, more := <-sio.messageQueue:
+				b, err := sio.conn.Write(msg)
+				if err != nil {
+					logger.Errorw("Error when writing bytes to buffer serial device", "error", err)
+				}
+
+				logger.Debugw("Wrote to serial device", "bytes", b)
+
+				if !more || sio.messageQueue == nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) error {
+	sio.currentUpload = &ImageUploadState{}
+
+	sio.currentUpload.Lock.Lock()
+	defer sio.currentUpload.Lock.Unlock()
+
+	logger.Debugw("Attempting to open image", "path", path)
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	logger.Debug("Attempting to read bytes from file")
+	dat, err := ioutil.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	logger.Debugw("Creating progress dialog")
+	dlg, err := zenity.Progress(zenity.Title("Uploading Image"), zenity.NoCancel())
+	if err != nil {
+		return err
+	}
+
+	err = dlg.Text(fmt.Sprintf("0/%d", len(dat)))
+	if err != nil {
+		return err
+	}
+
+	sio.currentUpload.LoadedFile = dat
+	sio.currentUpload.TotalBytesSent = 0
+	sio.currentUpload.Dialog = &dlg
+
+	sio.messageQueue <- []byte(fmt.Sprintf("sendimg %d", len(dat)))
+
+	return nil
+}
+
+func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error {
+	cu := sio.currentUpload
+	if cu == nil {
+		return errors.New("current upload object is empty")
+	}
+
+	logger.Debugw("Parsing line ", "line", line)
+
+	cu.Lock.Lock()
+	defer cu.Lock.Unlock()
+
+	dlg := *cu.Dialog
+
+	if cu.TotalBytesSent >= len(cu.LoadedFile) {
+		err := dlg.Complete()
+
+		if err != nil {
+			logger.Warnw("Issues cleaning up progress dialog", "error", err)
+		}
+		logger.Info("Upload completed")
+
+		return nil
+	}
+
+	end := util.MinInt(cu.TotalBytesSent+UploadBlock, len(cu.LoadedFile))
+	sio.messageQueue <- cu.LoadedFile[cu.TotalBytesSent:end]
+	cu.TotalBytesSent = end
+
+	err := dlg.Value(int((float64(cu.TotalBytesSent) / float64(len(cu.LoadedFile))) * 100))
+	err = dlg.Text(fmt.Sprintf("Uploaded %d/%d bytes", cu.TotalBytesSent, len(cu.LoadedFile)))
+
+	if err != nil {
+		logger.Warnw("Issues updating progress dialog", "error", err)
+	}
+
+	logger.Debugw("Sent bytes to controller", "sent", cu.TotalBytesSent, "total", len(cu.LoadedFile))
+
+	return nil
+}
+
+func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string) {
+	cus := sio.currentUpload
+
+	cleaned := strings.TrimSuffix(line, "\r\n")
+	split := strings.Split(cleaned, ",")
+
+	reason := "Unknown"
+	if len(split) > 1 {
+		reason = split[1]
+	} else {
+		logger.Warnw("Controller did not give a reason for failure", "line", split)
+	}
+
+	logger.Errorw("Failed to transfer image to microcontroller", "reason", reason)
+
+	cus.Lock.Lock()
+	defer cus.Lock.Unlock()
+
+	cus.LoadedFile = []byte{}
+	cus.TotalBytesSent = 0
+
+	dlg := *cus.Dialog
+	dlg.Text(fmt.Sprintf("Transfer FAILED! Reason: %s", reason))
+	dlg.Complete()
 }
