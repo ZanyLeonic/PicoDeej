@@ -1,6 +1,8 @@
 package deej
 
 import (
+	"path/filepath"
+
 	"github.com/getlantern/systray"
 	"github.com/ncruces/zenity"
 	"github.com/zanyleonic/picodeej/pkg/deej/icon"
@@ -73,6 +75,7 @@ func (d *Deej) initializeTray(onDone func()) {
 						zenity.Filename(``),
 						zenity.FileFilters{
 							{Name: "Portable Network Graphic", Patterns: []string{"*.png"}, CaseFold: true},
+							{Name: "Animated Image Set", Patterns: []string{"*.zip"}, CaseFold: true},
 						})
 
 					if err != nil {
@@ -80,8 +83,19 @@ func (d *Deej) initializeTray(onDone func()) {
 						return
 					}
 
+					ext := filepath.Ext(file)
 					logger.Debugw("Selected a file using the file picker", "path", file)
-					err = d.serial.StartImageUpload(logger, file)
+
+					if ext == ".png" {
+						err = d.serial.StartImageUpload(logger, file)
+					} else if ext == ".zip" {
+						err = d.serial.StartAnimatedUpload(logger, file)
+					} else {
+						logger.Errorw("User did not select a correct type of file.", "ext", ext)
+						d.notifier.Notify("Invalid file selected", "Image upload only supported static PNGs or Animated Image Sets in ZIP files.")
+						return
+					}
+
 					if err != nil {
 						logger.Errorw("Cannot upload selected image", "error", err)
 						return

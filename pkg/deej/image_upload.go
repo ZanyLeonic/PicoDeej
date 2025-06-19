@@ -62,7 +62,7 @@ func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) er
 	sio.currentUpload.TotalBytesSent = 0
 	sio.currentUpload.Dialog = &dlg
 
-	sio.messageQueue <- []byte(fmt.Sprintf("sendimg %d", len(dat)))
+	sio.messageQueue <- []byte(fmt.Sprintf("sendstaticimg %d", len(dat)))
 
 	return nil
 }
