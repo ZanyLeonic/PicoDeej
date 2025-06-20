@@ -1,41 +1,25 @@
 import _thread
+from proj_const import *
+import image_download
 import machine
-import micropython
-import gc
 import select
 import sys
 import os
 import tft_config
 import utime
 
-# Deej consts
-NUM_SLIDERS = 2
-NUM_SWITCHES = 3
-
-analogSliderValues = [0, 0]
-switchValues = [
-    machine.Pin(2, machine.Pin.IN, machine.Pin.PULL_UP),
-    machine.Pin(3, machine.Pin.IN, machine.Pin.PULL_UP),
-    machine.Pin(4, machine.Pin.IN, machine.Pin.PULL_UP)
-]
-
-slideMaster = machine.ADC(26)
-slideProg1 = machine.ADC(27)
+COMMANDS = {
+    "sendstaticimg": image_download.download_static_image,
+    "sendanimatedimg": image_download.download_animated_set
+}
 
 # New polling object for stdin
 serial = select.poll() 
 serial.register(sys.stdin, select.POLLIN) 
 
-# Image consts
-DEFAULT_IMAGE = "default.png"
-UPLOAD_IMAGE = "uploaded.dat"
-UPLOAD_PARTIAL = "uploaded.part"
-
-# Animated Image consts
-ANIM_FOLDER = "anim"
-MAX_FRAMES = 120
-
-MAX_FILE_SIZE = 1000000
+# Thread flags
+STOP_ANIMATION_THREAD = False
+ANIMATION_THREAD_EXITED = True
 
 # Read each slider's position
 def update_slider_values():
@@ -66,117 +50,32 @@ def send_slider_values():
 
 # Read loop for commands
 def read_input():
+    global STOP_ANIMATION_THREAD
+    global ANIMATION_THREAD_EXITED
+    
     if not serial.poll(0):
         return
     
     res = ""
     while serial.poll(0):
         res+=(sys.stdin.read(1))
-    cmd = res.split(" ")
-    if cmd[0] == "sendstaticimg":
-        if len(cmd) < 2 or not cmd[1].isdigit():
-            print("FAIL, invalid arguments")
-            return
-        
-        size = int(cmd[1])
-        if size > MAX_FILE_SIZE:
-            print("FAIL, too big")
-            return
-        
-        print(f"OK READY {size}")
-        
-        micropython.kbd_intr(-1) # Disable keyboard interrupt whilst sending binary
-        
-        gc.collect()
-        
-        total_recv = 0
-        with open(UPLOAD_PARTIAL, "wb") as f:
-            while total_recv < size:
-                if serial.poll(0):
-                    remaining = size - total_recv
-                    
-                    chunk = min(1024, remaining)
-                    f.write(sys.stdin.buffer.read(chunk))
-                    
-                    total_recv += chunk
-                    print(f"OK {total_recv}")
-        
-        micropython.kbd_intr(0x03) # Re-enable Keyboard interrupt
-        
-        print(f"OK DONE {total_recv}")
-
-        os.remove(UPLOAD_IMAGE)
-        os.rename(UPLOAD_PARTIAL, UPLOAD_IMAGE)
-        os.sync()
-        
-        gc.collect()
-        
-        tft.png(UPLOAD_IMAGE, 0, 0)
-    elif cmd[0] == "sendanimated":
-        if len(cmd) < 2 or not cmd[1].isdigit():
-            print("FAIL, invalid arguments")
-            return
-        
-        nFrames = int(cmd[1])
-        
-        if nFrames > MAX_FRAMES:
-            print("FAIL, too many frames")
-            return
-        
-        eFiles = None
-        try:
-            eFiles = os.listdir(ANIM_FOLDER)
-        except:
-            pass
-        
-        if eFiles == None:
-            try:
-                os.mkdir(ANIM_FOLDER)
-            except:
-                print("FAIL, cannot create folder for animations")
-                return
-        
-        try:
-            for file in eFiles:
-                os.remove(f"{ANIM_FOLDER}/{file}")
-        except:
-            print("FAIL, cannot clear old animation directory")
-            return
-        
-        print(f"OK FRAMES {nFrames}")
-        
-        for nF in range(nFrames):
-            total_recv = 0
-            rawSize = sys.stdin.buffer.readline().split(" ")
-            if len(rawSize) < 2 or rawSize[1].isdigit():
-                print("FAIL, frame size incorrectly specified")
-                return
-            
-            size = int(rawSize[1])
-            
-            print(f"OK READY {size}")
-           
-            micropython.kbd_intr(-1) # Disable keyboard interrupt whilst sending binary
-           
-            with open(UPLOAD_PARTIAL, "wb") as f:
-                while total_recv < size:
-                    if serial.poll(0):
-                        remaining = size - total_recv
-                        
-                        chunk = min(1024, remaining)
-                        f.write(sys.stdin.buffer.read(chunk))
-                        
-                        total_recv += chunk
-                        print(f"OK {total_recv}")
-            
-            os.rename(UPLOAD_PARTIAL, f"{ANIM_FOLDER}/frame_{nF}.png")
-            
-            micropython.kbd_intr(0x03)
-                        
-        print(f"OK DONE FRAMES {nFrames}")
+    cmd = res.strip().split(" ")
+    
+    if cmd[0] not in COMMANDS:
+        print(f"FAIL, Unknown command {cmd[0]}")
+        return
+    
+    STOP_ANIMATION_THREAD = True
+    while(not ANIMATION_THREAD_EXITED):
+        print("WAIT, Animation thread stopping...")
+        utime.sleep_ms(100)
+    
+    COMMANDS[cmd[0]](cmd)
 
 def do_animation():
     global tft
+    global STOP_ANIMATION_THREAD
+    global ANIMATION_THREAD_EXITED
     
     frames = []
     try:
@@ -191,16 +90,20 @@ def do_animation():
         except:
             tft.png(DEFAULT_IMAGE, 0, 0)
     else:
-        while(True):
+        ANIMATION_THREAD_EXITED = False
+        while(not STOP_ANIMATION_THREAD):
             for frame in frames:
                 tft.png(f"{ANIM_FOLDER}/{frame}", 0, 0)
+                if STOP_ANIMATION_THREAD:
+                    break
+        ANIMATION_THREAD_EXITED = True
 
 def do_sensor_loop():
     # Input/Output loop
     while(True):
         read_input()
         update_slider_values()
-        send_slider_values()
+        # send_slider_values()
         utime.sleep_ms(100)
     
 if __name__=='__main__':
