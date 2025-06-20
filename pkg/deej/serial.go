@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jacobsa/go-serial/serial"
+	"github.com/ncruces/zenity"
 	"go.uber.org/zap"
 
 	"github.com/micmonay/keybd_event"
@@ -33,6 +34,7 @@ type SerialIO struct {
 	messageQueue       chan []byte
 	currentUpload      *ImageUploadState
 	currentMultiUpload *MultiUploadState
+	transferDialog     *zenity.ProgressDialog
 
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int
@@ -53,7 +55,8 @@ type SliderMoveEvent struct {
 
 var expectedControlInput = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})* \d(\|\d)*\r\n$`)
 var transferInput = regexp.MustCompile(`^OK(?: (?:READY|DONE)? ?\d+| \d+)\r\n$`)
-var transferMultipleInput = regexp.MustCompile(`^OK\s+FRAMES?\s+(READY|DONE)?\s*\d+\r\n$`)
+var transferMultipleInput = regexp.MustCompile(`^OK\s+FRAMES?\s+(READY|DONE|NEXT)?\s*\d+\r\n$`)
+var transferWait = regexp.MustCompile("^WAIT")
 var transferFail = regexp.MustCompile(`^FAIL`)
 
 const UploadBlock = 1024
@@ -276,10 +279,16 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 		return
 	}
 
+	if transferWait.MatchString(line) {
+		logger.Infow("Waiting for controller not to be busy", "raw", line)
+		return
+	}
+
 	// this function receives an unsanitized line which is guaranteed to end with LF,
 	// but most lines will end with CRLF. it may also have garbage instead of
 	// deej-formatted values, so we must check for that! just ignore bad ones
 	if !expectedControlInput.MatchString(line) {
+		logger.Debugw("Unexpected output", "output", line)
 		return
 	}
 
@@ -291,7 +300,6 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 	sio.handleSliders(logger, splitLine[0])
 	sio.handleSwitches(logger, splitLine[1])
 }
-
 
 func (sio *SerialIO) handleSwitches(logger *zap.SugaredLogger, line string) {
 	// split on pipe (|), this gives a slice of numerical strings between "0" and "1023"
@@ -421,4 +429,3 @@ func (sio *SerialIO) writeLine(logger *zap.SugaredLogger) {
 		}
 	}()
 }
-
