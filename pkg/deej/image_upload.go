@@ -1,10 +1,12 @@
 package deej
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -28,6 +30,7 @@ type MultiUploadState struct {
 	CurrentItem    int
 }
 
+var animatedFramePattern = regexp.MustCompile(`^frame_\d{2}_delay-\d+(\.\d+)?s\.png$`)
 
 func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) error {
 	sio.currentUpload = &ImageUploadState{}
@@ -67,8 +70,63 @@ func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) er
 	return nil
 }
 
-func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, file string) error {
-	panic("unimplemented")
+func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string) error {
+	sio.currentMultiUpload = &MultiUploadState{}
+
+	sio.currentMultiUpload.Lock.Lock()
+	defer sio.currentMultiUpload.Lock.Unlock()
+
+	logger.Debugw("Attempting to open image", "path", path)
+	zip, err := zip.OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer zip.Close()
+
+	for i, file := range zip.File {
+		cFormat := animatedFramePattern.MatchString(file.Name)
+
+		logger.Debugw(fmt.Sprintf("[%d]: %s", i, file.Name))
+		logger.Debugw("Passes regex?", "pass", cFormat)
+
+		if !cFormat {
+			sio.currentMultiUpload = &MultiUploadState{}
+			return errors.New("animated image set is not in the correct format")
+		}
+
+		fileInZip, err := file.Open()
+		if err != nil {
+			return err
+		}
+
+		raw, err := ioutil.ReadAll(fileInZip)
+		if err != nil {
+			return err
+		}
+
+		sio.currentMultiUpload.LoadedFiles[i] = raw
+	}
+
+	totalFiles := len(sio.currentMultiUpload.LoadedFiles)
+
+	logger.Debugw("Creating progress dialog")
+	dlg, err := zenity.Progress(zenity.Title("Uploading Image"), zenity.NoCancel())
+	if err != nil {
+		return err
+	}
+
+	err = dlg.Text(fmt.Sprintf("Uploaded frame 0/%d", totalFiles))
+	if err != nil {
+		return err
+	}
+
+	sio.currentMultiUpload.CurrentItem = 0
+	sio.currentMultiUpload.TotalBytesSent = make([]int, totalFiles)
+	sio.currentMultiUpload.Dialog = &dlg
+
+	sio.messageQueue <- []byte(fmt.Sprintf("sendanimated %d", totalFiles))
+
+	return nil;
 }
 
 
@@ -113,7 +171,65 @@ func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error
 }
 
 func (sio *SerialIO) transferAnimated(logger *zap.SugaredLogger, line string) error {
-	panic("unimplemented")
+	mcu := sio.currentMultiUpload
+	if mcu == nil {
+		return errors.New("multi upload object is empty")
+	}
+
+	logger.Debugw("Parsing line ", "line", line)
+	lastResp := strings.TrimSuffix(line, "\r\n")
+
+	mcu.Lock.Lock()
+	defer mcu.Lock.Unlock()
+
+	cItem := mcu.CurrentItem
+	total := len(mcu.LoadedFiles)
+	dlg := *mcu.Dialog
+
+	if cItem > total {
+		err := dlg.Complete()
+
+		if err != nil {
+			logger.Warnw("Issues cleaning up progress dialog", "error", err)
+		}
+
+		logger.Infow("Upload completed", "total", total)
+
+		return nil
+	}
+
+	if mcu.TotalBytesSent[cItem] >= len(mcu.LoadedFiles[cItem]) {
+		logger.Infow("Finished uploading frame", "file", mcu.CurrentItem, "totalFiles", total)
+
+		sio.currentMultiUpload.CurrentItem += 1
+
+		err := dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem+1, total))
+		if err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	if strings.HasPrefix(lastResp, "OK FRAMES READY") {
+		sio.messageQueue <- []byte(fmt.Sprintf("SIZE %d", len(mcu.LoadedFiles[cItem]))) 
+		return nil
+	}
+
+	end := util.MinInt(mcu.TotalBytesSent[cItem+UploadBlock], len(mcu.LoadedFiles[cItem]))
+	sio.messageQueue <- mcu.LoadedFiles[cItem][mcu.TotalBytesSent[cItem]:end]
+	mcu.TotalBytesSent[cItem] = end
+
+	err := dlg.Value(int((float64(cItem) / float64(total)) * 100))
+	err = dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem+1, total))
+
+	if err != nil {
+		logger.Warnw("Issues updating progress dialog", "error", err)
+	}
+
+	logger.Debugw("Sent bytes to controller", "cItem", cItem, "total", total, "sentBytes", mcu.TotalBytesSent[cItem], "totalBytes", len(mcu.LoadedFiles[cItem]))
+	
+	return nil
 }
 
 func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string) {
