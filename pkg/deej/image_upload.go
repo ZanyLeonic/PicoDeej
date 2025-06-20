@@ -19,14 +19,12 @@ type ImageUploadState struct {
 	Lock           sync.Mutex
 	LoadedFile     []byte
 	TotalBytesSent int
-	Dialog         *zenity.ProgressDialog
 }
 
 type MultiUploadState struct {
 	Lock           sync.Mutex
 	LoadedFiles    [][]byte
 	TotalBytesSent []int
-	Dialog         *zenity.ProgressDialog
 	CurrentItem    int
 }
 
@@ -63,9 +61,9 @@ func (sio *SerialIO) StartImageUpload(logger *zap.SugaredLogger, path string) er
 
 	sio.currentUpload.LoadedFile = dat
 	sio.currentUpload.TotalBytesSent = 0
-	sio.currentUpload.Dialog = &dlg
+	sio.transferDialog = &dlg
 
-	sio.messageQueue <- []byte(fmt.Sprintf("sendstaticimg %d", len(dat)))
+	sio.messageQueue <- []byte(fmt.Sprintf("sendstaticimg %d\r\n", len(dat)))
 
 	return nil
 }
@@ -82,6 +80,8 @@ func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string)
 		return err
 	}
 	defer zip.Close()
+
+	sio.currentMultiUpload.LoadedFiles = make([][]byte, 0, 120)
 
 	for i, file := range zip.File {
 		cFormat := animatedFramePattern.MatchString(file.Name)
@@ -104,7 +104,7 @@ func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string)
 			return err
 		}
 
-		sio.currentMultiUpload.LoadedFiles[i] = raw
+		sio.currentMultiUpload.LoadedFiles = append(sio.currentMultiUpload.LoadedFiles, raw)
 	}
 
 	totalFiles := len(sio.currentMultiUpload.LoadedFiles)
@@ -115,20 +115,19 @@ func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string)
 		return err
 	}
 
-	err = dlg.Text(fmt.Sprintf("Uploaded frame 0/%d", totalFiles))
+	err = dlg.Text(fmt.Sprintf("Uploaded frame 0/%d", totalFiles-1))
 	if err != nil {
 		return err
 	}
 
 	sio.currentMultiUpload.CurrentItem = 0
 	sio.currentMultiUpload.TotalBytesSent = make([]int, totalFiles)
-	sio.currentMultiUpload.Dialog = &dlg
+	sio.transferDialog = &dlg
 
-	sio.messageQueue <- []byte(fmt.Sprintf("sendanimated %d", totalFiles))
+	sio.messageQueue <- []byte(fmt.Sprintf("sendanimatedimg %d\r\n", totalFiles))
 
-	return nil;
+	return nil
 }
-
 
 func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error {
 	cu := sio.currentUpload
@@ -141,7 +140,7 @@ func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error
 	cu.Lock.Lock()
 	defer cu.Lock.Unlock()
 
-	dlg := *cu.Dialog
+	dlg := *sio.transferDialog
 
 	if cu.TotalBytesSent >= len(cu.LoadedFile) {
 		err := dlg.Complete()
@@ -183,8 +182,8 @@ func (sio *SerialIO) transferAnimated(logger *zap.SugaredLogger, line string) er
 	defer mcu.Lock.Unlock()
 
 	cItem := mcu.CurrentItem
-	total := len(mcu.LoadedFiles)
-	dlg := *mcu.Dialog
+	total := len(mcu.LoadedFiles) - 1
+	dlg := *sio.transferDialog
 
 	if cItem > total {
 		err := dlg.Complete()
@@ -212,29 +211,32 @@ func (sio *SerialIO) transferAnimated(logger *zap.SugaredLogger, line string) er
 	}
 
 	if strings.HasPrefix(lastResp, "OK FRAMES READY") {
-		sio.messageQueue <- []byte(fmt.Sprintf("SIZE %d", len(mcu.LoadedFiles[cItem]))) 
+		sio.messageQueue <- []byte(fmt.Sprintf("SIZE %d\r\n", len(mcu.LoadedFiles[cItem])))
 		return nil
 	}
 
-	end := util.MinInt(mcu.TotalBytesSent[cItem+UploadBlock], len(mcu.LoadedFiles[cItem]))
+	if strings.HasPrefix(lastResp, "OK FRAME NEXT") {
+		sio.messageQueue <- []byte(fmt.Sprintf("SIZE %d\r\n", len(mcu.LoadedFiles[cItem])))
+		return nil
+	}
+
+	end := util.MinInt(mcu.TotalBytesSent[cItem]+UploadBlock, len(mcu.LoadedFiles[cItem]))
 	sio.messageQueue <- mcu.LoadedFiles[cItem][mcu.TotalBytesSent[cItem]:end]
 	mcu.TotalBytesSent[cItem] = end
 
 	err := dlg.Value(int((float64(cItem) / float64(total)) * 100))
-	err = dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem+1, total))
+	err = dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem, total))
 
 	if err != nil {
 		logger.Warnw("Issues updating progress dialog", "error", err)
 	}
 
 	logger.Debugw("Sent bytes to controller", "cItem", cItem, "total", total, "sentBytes", mcu.TotalBytesSent[cItem], "totalBytes", len(mcu.LoadedFiles[cItem]))
-	
+
 	return nil
 }
 
 func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string) {
-	cus := sio.currentUpload
-
 	cleaned := strings.TrimSuffix(line, "\r\n")
 	split := strings.Split(cleaned, ",")
 
@@ -247,13 +249,7 @@ func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string)
 
 	logger.Errorw("Failed to transfer image to microcontroller", "reason", reason)
 
-	cus.Lock.Lock()
-	defer cus.Lock.Unlock()
-
-	cus.LoadedFile = []byte{}
-	cus.TotalBytesSent = 0
-
-	dlg := *cus.Dialog
+	dlg := *sio.transferDialog
 	dlg.Text(fmt.Sprintf("Transfer FAILED! Reason: %s", reason))
 	dlg.Complete()
 }
