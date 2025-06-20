@@ -74,6 +74,7 @@ func (d *Deej) initializeTray(onDone func()) {
 					file, err := zenity.SelectFile(
 						zenity.Filename(``),
 						zenity.FileFilters{
+							{Name: "Deej Compatible Formats", Patterns: []string{"*.png", "*.zip"}, CaseFold: true},
 							{Name: "Portable Network Graphic", Patterns: []string{"*.png"}, CaseFold: true},
 							{Name: "Animated Image Set", Patterns: []string{"*.zip"}, CaseFold: true},
 						})
