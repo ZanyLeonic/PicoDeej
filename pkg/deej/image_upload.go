@@ -150,6 +150,8 @@ func (sio *SerialIO) transferBlock(logger *zap.SugaredLogger, line string) error
 		}
 		logger.Info("Upload completed")
 
+		sio.transferInProgress = false
+
 		return nil
 	}
 
@@ -193,6 +195,8 @@ func (sio *SerialIO) transferAnimated(logger *zap.SugaredLogger, line string) er
 		}
 
 		logger.Infow("Upload completed", "total", total)
+
+		sio.transferInProgress = false
 
 		return nil
 	}
@@ -256,4 +260,6 @@ func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string)
 	if err != nil {
 		logger.Warnw("Failed to finish dialogue")
 	}
+
+	sio.transferInProgress = false
 }

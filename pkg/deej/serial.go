@@ -35,6 +35,7 @@ type SerialIO struct {
 	currentUpload      *ImageUploadState
 	currentMultiUpload *MultiUploadState
 	transferDialog     *zenity.ProgressDialog
+	transferInProgress bool
 
 	lastKnownNumSliders        int
 	lastKnownNumSwitches       int

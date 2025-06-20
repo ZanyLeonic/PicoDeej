@@ -71,6 +71,13 @@ func (d *Deej) initializeTray(onDone func()) {
 
 				case <-uploadImage.ClickedCh:
 					logger.Info("Upload image menu item, clicked, opening dialog")
+					if d.serial.transferInProgress {
+						d.notifier.Notify("Image Upload in progress", "Only one transfer can happen at once.")
+						continue
+					}
+
+					d.serial.transferInProgress = true
+
 					file, err := zenity.SelectFile(
 						zenity.Filename(``),
 						zenity.FileFilters{
@@ -81,7 +88,7 @@ func (d *Deej) initializeTray(onDone func()) {
 
 					if err != nil {
 						logger.Errorw("Failed to create zenity file picker!", "error", err)
-						return
+						continue
 					}
 
 					ext := filepath.Ext(file)
@@ -94,12 +101,14 @@ func (d *Deej) initializeTray(onDone func()) {
 					} else {
 						logger.Errorw("User did not select a correct type of file.", "ext", ext)
 						d.notifier.Notify("Invalid file selected", "Image upload only supported static PNGs or Animated Image Sets in ZIP files.")
-						return
+						continue
 					}
 
 					if err != nil {
 						logger.Errorw("Cannot upload selected image", "error", err)
-						return
+						d.notifier.Notify("Upload still in progress", "Please ensure all previous transfers have completed and dialogs closed, before starting another.")
+						d.serial.transferInProgress = false
+						continue
 					}
 				}
 			}
