@@ -75,15 +75,15 @@ func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string)
 	defer sio.currentMultiUpload.Lock.Unlock()
 
 	logger.Debugw("Attempting to open image", "path", path)
-	zip, err := zip.OpenReader(path)
+	zipF, err := zip.OpenReader(path)
 	if err != nil {
 		return err
 	}
-	defer zip.Close()
+	defer zipF.Close()
 
 	sio.currentMultiUpload.LoadedFiles = make([][]byte, 0, 120)
 
-	for i, file := range zip.File {
+	for i, file := range zipF.File {
 		cFormat := animatedFramePattern.MatchString(file.Name)
 
 		logger.Debugw(fmt.Sprintf("[%d]: %s", i, file.Name))
@@ -115,7 +115,7 @@ func (sio *SerialIO) StartAnimatedUpload(logger *zap.SugaredLogger, path string)
 		return err
 	}
 
-	err = dlg.Text(fmt.Sprintf("Uploaded frame 0/%d", totalFiles-1))
+	err = dlg.Text(fmt.Sprintf("Uploaded frame 0/%d", totalFiles))
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func (sio *SerialIO) transferAnimated(logger *zap.SugaredLogger, line string) er
 
 		sio.currentMultiUpload.CurrentItem += 1
 
-		err := dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem+1, total))
+		err := dlg.Text(fmt.Sprintf("Uploaded frame %d/%d", cItem, total))
 		if err != nil {
 			return err
 		}
@@ -250,6 +250,10 @@ func (sio *SerialIO) handleTransferError(logger *zap.SugaredLogger, line string)
 	logger.Errorw("Failed to transfer image to microcontroller", "reason", reason)
 
 	dlg := *sio.transferDialog
-	dlg.Text(fmt.Sprintf("Transfer FAILED! Reason: %s", reason))
-	dlg.Complete()
+	err := dlg.Text(fmt.Sprintf("Transfer FAILED! Reason: %s", reason))
+	err = dlg.Complete()
+
+	if err != nil {
+		logger.Warnw("Failed to finish dialogue")
+	}
 }
