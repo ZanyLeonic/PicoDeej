@@ -4,7 +4,7 @@ import gc
 import micropython
 import sys
 
-def download_static_image(cmd, tft):
+def download_static_image(cmd):
     if len(cmd) < 2 or not cmd[1].isdigit():
         print("FAIL, invalid arguments")
         return
@@ -13,6 +13,11 @@ def download_static_image(cmd, tft):
     if size > MAX_FILE_SIZE:
         print("FAIL, too big")
         return
+    
+    try:
+        delete_old_frames()
+    except:
+        print("FAIL, cannot clear old animation folder")
     
     print(f"OK READY {size}")
     
@@ -35,7 +40,11 @@ def download_static_image(cmd, tft):
     
     print(f"OK DONE {total_recv}")
 
-    os.remove(UPLOAD_IMAGE)
+    try:
+        os.remove(UPLOAD_IMAGE)
+    except:
+        pass
+    
     os.rename(UPLOAD_PARTIAL, UPLOAD_IMAGE)
     os.sync()
     
@@ -51,27 +60,11 @@ def download_animated_set(cmd):
     if nFrames > MAX_FRAMES:
         print("FAIL, too many frames")
         return
-    STOP_ANIMATION_THREAD = True
-    eFiles = None
+    
     try:
-        eFiles = os.listdir(ANIM_FOLDER)
+        delete_old_frames(True)
     except:
-        pass
-
-    if eFiles == None:
-        try:
-            os.mkdir(ANIM_FOLDER)
-        except:
-            print("FAIL, cannot create folder for animations")
-            return
-
-    if eFiles != None:
-        try:
-            for file in eFiles:
-                os.remove(f"{ANIM_FOLDER}/{file}")
-        except:
-            print("FAIL, cannot clear old animation directory")
-            return
+        print("FAIL, cannot clear old animation folder")
 
     print(f"OK FRAMES READY {nFrames}")
 
@@ -108,10 +101,28 @@ def download_animated_set(cmd):
                 
                 total_recv += chunk
                 print(f"OK FRAME {total_recv}")
+                gc.collect()
 
         os.rename(UPLOAD_PARTIAL, f"{ANIM_FOLDER}/frame_{nF:03}.png")
         os.sync()
+        gc.collect()
         
         micropython.kbd_intr(0x03)
                     
-    print(f"OK DONE FRAMES {nFrames}")
+    print(f"OK FRAMES DONE {nFrames}")
+    
+def delete_old_frames(create_new_folder=False):
+    eFiles = None
+    try:
+        eFiles = os.listdir(ANIM_FOLDER)
+    except:
+        pass
+
+    if eFiles != None:
+        for file in eFiles:
+            os.remove(f"{ANIM_FOLDER}/{file}")
+        os.rmdir(ANIM_FOLDER)
+
+    if eFiles == None and create_new_folder:
+        os.mkdir(ANIM_FOLDER)
+
