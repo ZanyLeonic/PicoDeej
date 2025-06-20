@@ -271,6 +271,7 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 		if err != nil {
 			logger.Errorw("Error when transfering animated image!", "error", err)
 		}
+		return
 	}
 
 	// Handle I/O errors
