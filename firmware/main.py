@@ -71,6 +71,9 @@ def read_input():
         utime.sleep_ms(100)
     
     COMMANDS[cmd[0]](cmd)
+    
+    utime.sleep_ms(100)
+    second_thread = _thread.start_new_thread(do_animation, ())
 
 def do_animation():
     global tft
