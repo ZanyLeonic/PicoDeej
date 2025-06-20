@@ -88,6 +88,10 @@ def download_animated_set(cmd):
             return
         
         size = int(rawSize[1])
+        if size > MAX_FILE_SIZE:
+            print("FAIL, frame too big")
+            return
+    
         
         print(f"OK FRAME READY {size}")
         
