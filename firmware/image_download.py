@@ -65,6 +65,7 @@ def download_animated_set(cmd):
         delete_old_frames(True)
     except:
         print("FAIL, cannot clear old animation folder")
+        return
 
     print(f"OK FRAMES READY {nFrames}")
 
@@ -123,6 +124,6 @@ def delete_old_frames(create_new_folder=False):
             os.remove(f"{ANIM_FOLDER}/{file}")
         os.rmdir(ANIM_FOLDER)
 
-    if eFiles == None and create_new_folder:
+    if create_new_folder:
         os.mkdir(ANIM_FOLDER)
 
