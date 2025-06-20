@@ -49,10 +49,7 @@ def send_slider_values():
     print(f"{builtString} {builtString2}")
 
 # Read loop for commands
-def read_input():
-    global STOP_ANIMATION_THREAD
-    global ANIMATION_THREAD_EXITED
-    
+def read_input():    
     if not serial.poll(0):
         return
     
@@ -65,20 +62,20 @@ def read_input():
         print(f"FAIL, Unknown command {cmd[0]}")
         return
     
-    STOP_ANIMATION_THREAD = True
-    while(not ANIMATION_THREAD_EXITED):
-        print("WAIT, Animation thread stopping...")
-        utime.sleep_ms(100)
+    stop_animation_loop()
     
     COMMANDS[cmd[0]](cmd)
     
     utime.sleep_ms(100)
+    
     second_thread = _thread.start_new_thread(do_animation, ())
 
 def do_animation():
     global tft
     global STOP_ANIMATION_THREAD
     global ANIMATION_THREAD_EXITED
+    
+    STOP_ANIMATION_THREAD = False
     
     frames = []
     try:
@@ -106,9 +103,18 @@ def do_sensor_loop():
     while(True):
         read_input()
         update_slider_values()
-        # send_slider_values()
+        send_slider_values()
         utime.sleep_ms(100)
+
+def stop_animation_loop():
+    global STOP_ANIMATION_THREAD
+    global ANIMATION_THREAD_EXITED
     
+    STOP_ANIMATION_THREAD = True
+    while(not ANIMATION_THREAD_EXITED):
+        print("WAIT, Animation thread stopping...")
+        utime.sleep_ms(100)
+
 if __name__=='__main__':
     # Initialise the screen
     tft = tft_config.config(0, buffer_size=4096)
