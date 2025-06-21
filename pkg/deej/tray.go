@@ -1,6 +1,8 @@
 package deej
 
 import (
+	"path/filepath"
+
 	"github.com/getlantern/systray"
 	"github.com/ncruces/zenity"
 	"github.com/zanyleonic/picodeej/pkg/deej/icon"
@@ -69,22 +71,44 @@ func (d *Deej) initializeTray(onDone func()) {
 
 				case <-uploadImage.ClickedCh:
 					logger.Info("Upload image menu item, clicked, opening dialog")
+					if d.serial.transferInProgress {
+						d.notifier.Notify("Image Upload in progress", "Only one transfer can happen at once.")
+						continue
+					}
+
+					d.serial.transferInProgress = true
+
 					file, err := zenity.SelectFile(
 						zenity.Filename(``),
 						zenity.FileFilters{
+							{Name: "Deej Compatible Formats", Patterns: []string{"*.png", "*.zip"}, CaseFold: true},
 							{Name: "Portable Network Graphic", Patterns: []string{"*.png"}, CaseFold: true},
+							{Name: "Animated Image Set", Patterns: []string{"*.zip"}, CaseFold: true},
 						})
 
 					if err != nil {
 						logger.Errorw("Failed to create zenity file picker!", "error", err)
-						return
+						continue
 					}
 
+					ext := filepath.Ext(file)
 					logger.Debugw("Selected a file using the file picker", "path", file)
-					err = d.serial.StartImageUpload(logger, file)
+
+					if ext == ".png" {
+						err = d.serial.StartImageUpload(logger, file)
+					} else if ext == ".zip" {
+						err = d.serial.StartAnimatedUpload(logger, file)
+					} else {
+						logger.Errorw("User did not select a correct type of file.", "ext", ext)
+						d.notifier.Notify("Invalid file selected", "Image upload only supported static PNGs or Animated Image Sets in ZIP files.")
+						continue
+					}
+
 					if err != nil {
 						logger.Errorw("Cannot upload selected image", "error", err)
-						return
+						d.notifier.Notify("Error Starting Image Upload", "Please ensure all previous transfers have completed and dialogs closed, before starting another.")
+						d.serial.transferInProgress = false
+						continue
 					}
 				}
 			}

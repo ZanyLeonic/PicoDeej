@@ -1,31 +1,25 @@
+import _thread
+from proj_const import *
+import image_download
 import machine
-import micropython
 import select
 import sys
+import os
 import tft_config
 import utime
 
-# Deej consts
-NUM_SLIDERS = 2
-NUM_SWITCHES = 3
-
-analogSliderValues = [0, 0]
-switchValues = [
-    machine.Pin(2, machine.Pin.IN, machine.Pin.PULL_UP),
-    machine.Pin(3, machine.Pin.IN, machine.Pin.PULL_UP),
-    machine.Pin(4, machine.Pin.IN, machine.Pin.PULL_UP)
-]
-
-slideMaster = machine.ADC(26)
-slideProg1 = machine.ADC(27)
+COMMANDS = {
+    "sendstaticimg": image_download.download_static_image,
+    "sendanimatedimg": image_download.download_animated_set
+}
 
 # New polling object for stdin
 serial = select.poll() 
 serial.register(sys.stdin, select.POLLIN) 
 
-# Image consts
-DEFAULT_IMAGE = "default.png"
-UPLOAD_IMAGE = "uploaded.dat"
+# Thread flags
+STOP_ANIMATION_THREAD = False
+ANIMATION_THREAD_EXITED = True
 
 # Read each slider's position
 def update_slider_values():
@@ -55,55 +49,82 @@ def send_slider_values():
     print(f"{builtString} {builtString2}")
 
 # Read loop for commands
-def read_input():
+def read_input():    
     if not serial.poll(0):
         return
     
     res = ""
     while serial.poll(0):
         res+=(sys.stdin.read(1))
-    cmd = res.split(" ")
-    if cmd[0] == "sendimg":
-        if len(cmd) < 2 or not cmd[1].isdigit():
-            return
-        size = int(cmd[1])
-        if size > 100000:
-            print("FAIL, too big")
-            return
-        
-        print(f"OK READY {size}")
-        
-        micropython.kbd_intr(-1) # Disable keyboard interrupt whilst sending binary
-        
-        data = b''
-        while len(data) < size:
-            if serial.poll(0):
-                remaining = size - len(data)
-                data += sys.stdin.buffer.read(min(1024, remaining))
-                print(f"OK {len(data)}")
-        
-        micropython.kbd_intr(0x03) # Re-enable Keyboard interrupt
-        
-        print(f"OK DONE {len(data)}")
-        with open(UPLOAD_IMAGE, "wb") as f:
-            f.write(data)
-        
-        tft.png(UPLOAD_IMAGE, 0, 0)
+    cmd = res.strip().split(" ")
+    
+    if cmd[0] not in COMMANDS:
+        print(f"FAIL, Unknown command {cmd[0]}")
+        return
+    
+    stop_animation_loop()
+    
+    COMMANDS[cmd[0]](cmd)
+    
+    utime.sleep_ms(100)
+    
+    second_thread = _thread.start_new_thread(do_animation, ())
+
+def do_animation():
+    global tft
+    global STOP_ANIMATION_THREAD
+    global ANIMATION_THREAD_EXITED
+    
+    STOP_ANIMATION_THREAD = False
+    
+    frames = []
+    try:
+        frames = sorted(os.listdir(ANIM_FOLDER))
+    except:
+        pass
+    
+    if len(frames) == 0:
+        # Attempt to load the user's image, but fallback if it fails
+        try:
+            tft.png(UPLOAD_IMAGE, 0, 0)
+        except:
+            tft.png(DEFAULT_IMAGE, 0, 0)
+    else:
+        ANIMATION_THREAD_EXITED = False
+        while(not STOP_ANIMATION_THREAD):
+            for frame in frames:
+                tft.png(f"{ANIM_FOLDER}/{frame}", 0, 0)
+                if STOP_ANIMATION_THREAD:
+                    break
+        ANIMATION_THREAD_EXITED = True
+
+def do_sensor_loop():
+    # Input/Output loop
+    while(True):
+        read_input()
+        update_slider_values()
+        send_slider_values()
+        utime.sleep_ms(100)
+
+def stop_animation_loop():
+    global STOP_ANIMATION_THREAD
+    global ANIMATION_THREAD_EXITED
+    
+    STOP_ANIMATION_THREAD = True
+    while(not ANIMATION_THREAD_EXITED):
+        print("WAIT, Animation thread stopping...")
+        utime.sleep_ms(100)
 
 if __name__=='__main__':
     # Initialise the screen
     tft = tft_config.config(0, buffer_size=4096)
     tft.init()
     
-    # Attempt to load the user's image, but fallback if it fails
+    # Attempt to delete any unfinished transfers
     try:
-        tft.png(UPLOAD_IMAGE, 0, 0)
+        os.delete(UPLOAD_PARTIAL)
     except:
-        tft.png(DEFAULT_IMAGE, 0, 0)
-
-    # Input/Output loop
-    while(True):
-        read_input()
-        update_slider_values()
-        send_slider_values()
-        utime.sleep(0.01)
+        pass
+    
+    second_thread = _thread.start_new_thread(do_animation, ())
+    do_sensor_loop()
