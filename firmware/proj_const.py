@@ -10,7 +10,7 @@ UPLOAD_PARTIAL = "uploaded.part"
 
 # Animated Image consts
 ANIM_FOLDER = "anim"
-MAX_FRAMES = 120
+MAX_FRAMES = 240
 
 # Deej consts
 NUM_SLIDERS = 2
