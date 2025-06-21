@@ -106,7 +106,7 @@ func (d *Deej) initializeTray(onDone func()) {
 
 					if err != nil {
 						logger.Errorw("Cannot upload selected image", "error", err)
-						d.notifier.Notify("Upload still in progress", "Please ensure all previous transfers have completed and dialogs closed, before starting another.")
+						d.notifier.Notify("Error Starting Image Upload", "Please ensure all previous transfers have completed and dialogs closed, before starting another.")
 						d.serial.transferInProgress = false
 						continue
 					}
